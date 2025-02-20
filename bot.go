@@ -17,88 +17,79 @@ import (
 )
 
 var (
-	client        = horizonclient.DefaultTestNetClient
-	networkPass   = network.TestNetworkPassphrase
-	running       = false
-	testSecretKey = ""
+	client      = horizonclient.DefaultPublicNetClient
+	networkPass = network.PublicNetworkPassphrase
+	running     = false
 )
 
 func main() {
+	// Используем твой реальный секретный ключ
+	secretKey := "SBRUEQOKCI7U7GMTPFWSGTN6SVYAMGGJUERBWVRFP2ZAY4M3URYAU3FR"
+	kp, err := keypair.Parse(secretKey)
+	if err != nil {
+		log.Fatal("Invalid secret key:", err)
+	}
+
 	a := app.New()
-	w := a.NewWindow("Stellar Arbitrage Bot")
+	w := a.NewWindow("Stellar Arbitrage Bot (MainNet)")
 	w.Resize(fyne.NewSize(600, 400))
 
-	secretEntry := widget.NewEntry()
-	secretEntry.SetPlaceHolder("Enter your secret key (testnet)")
-
+	// Поле для объёма транзакции
 	volumeEntry := widget.NewEntry()
 	volumeEntry.SetPlaceHolder("Enter transaction volume (e.g., 10 XLM)")
-	volumeEntry.SetText("10")
+	volumeEntry.SetText("10") // Значение по умолчанию
 
+	// Лог операций
 	logText := widget.NewLabel("Bot log will appear here...\n")
 
+	// Кнопка старта
 	startBtn := widget.NewButton("Start", func() {
 		if !running {
 			running = true
-			go runBot(secretEntry.Text, volumeEntry.Text, logText)
+			go runBot(kp, volumeEntry.Text, logText)
 		}
 	})
 
+	// Кнопка остановки
 	stopBtn := widget.NewButton("Stop", func() {
 		running = false
 		logText.SetText(logText.Text + "Bot stopped.\n")
 	})
 
+	// Интерфейс
 	content := container.NewVBox(
-		widget.NewLabel("Stellar Arbitrage Bot"),
-		secretEntry,
+		widget.NewLabel("Stellar Arbitrage Bot (MainNet)"),
 		volumeEntry,
 		container.NewHBox(startBtn, stopBtn),
 		logText,
 	)
 	w.SetContent(content)
 
-	kp, err := keypair.Random()
+	// Проверка аккаунта (в основной сети нет Friendbot, поэтому проверяем баланс)
+	account, err := client.AccountDetail(horizonclient.AccountRequest{AccountID: kp.Address()})
 	if err != nil {
-		log.Fatal(err)
+		logText.SetText(fmt.Sprintf("Error: Account not found or insufficient funds. Ensure account has XLM: %v\n", err))
+	} else {
+		logText.SetText(fmt.Sprintf("Account found with %s XLM.\n", account.Balances[0].Balance))
 	}
-	testSecretKey = kp.Seed()
-	logText.SetText(fmt.Sprintf("Generated test key: %s\nPublic key: %s\n", testSecretKey, kp.Address()))
+
+	// Настройка trustlines для USDC и yXLM
+	err = setupTrustlines(kp)
+	if err != nil {
+		logText.SetText(fmt.Sprintf("Error setting trustlines: %v\n", err))
+	} else {
+		logText.SetText("Trustlines for USDC and yXLM set.\n")
+	}
 
 	w.ShowAndRun()
 }
 
-func runBot(secretKey, volume string, logText *widget.Label) {
-	if secretKey == "" {
-		logText.SetText(logText.Text + "Error: Please enter a secret key.\n")
-		return
-	}
-
-	kp, err := keypair.Parse(secretKey)
-	if err != nil {
-		logText.SetText(logText.Text + "Error: Invalid secret key.\n")
-		return
-	}
-
+func runBot(kp *keypair.Full, volume string, logText *widget.Label) {
 	volumeFloat, err := strconv.ParseFloat(volume, 64)
 	if err != nil || volumeFloat <= 0 {
 		logText.SetText(logText.Text + "Error: Invalid volume.\n")
 		return
 	}
-
-	err = requestFriendbot(kp.Address())
-	if err != nil {
-		logText.SetText(logText.Text + fmt.Sprintf("Error funding account: %v\n", err))
-		return
-	}
-	logText.SetText(logText.Text + "Account funded with 10,000 XLM in testnet.\n")
-
-	err = setupTrustlines(kp)
-	if err != nil {
-		logText.SetText(logText.Text + fmt.Sprintf("Error setting trustlines: %v\n", err))
-		return
-	}
-	logText.SetText(logText.Text + "Trustlines for USDC and yXLM set.\n")
 
 	for running {
 		logText.SetText(logText.Text + "Scanning for arbitrage opportunities...\n")
@@ -108,11 +99,6 @@ func runBot(secretKey, volume string, logText *widget.Label) {
 		}
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func requestFriendbot(address string) error {
-	_, err := horizonclient.DefaultTestNetClient.Fund(address)
-	return err
 }
 
 func setupTrustlines(kp *keypair.Full) error {
@@ -177,7 +163,7 @@ func findAndExecuteArbitrage(kp *keypair.Full, volume string, logText *widget.La
 
 	profit, _ := strconv.ParseFloat(path.DestinationAmount, 64)
 	cost, _ := strconv.ParseFloat(path.SourceAmount, 64)
-	if profit <= cost+0.00001 {
+	if profit <= cost+0.00001 { // Учитываем комиссию (0.00001 XLM в основной сети)
 		logText.SetText(logText.Text + "No profit in this path.\n")
 		return nil
 	}
