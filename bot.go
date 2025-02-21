@@ -65,7 +65,7 @@ func main() {
 	)
 	w.SetContent(content)
 
-	// Проверка аккаунта (в основной сети нет Friendbot, поэтому проверяем баланс)
+	// Проверка аккаунта (в основной сети нет Friendbot, проверяем баланс)
 	account, err := client.AccountDetail(horizonclient.AccountRequest{AccountID: kp.Address()})
 	if err != nil {
 		logText.SetText(fmt.Sprintf("Error: Account not found or insufficient funds. Ensure account has XLM: %v\n", err))
